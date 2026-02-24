@@ -1,0 +1,31 @@
+{
+  "name": "erm-editor",
+  "displayName": "ERM Editor",
+  "description": "Visual Entity-Relationship Model editor with MariaDB SQL export",
+  "version": "0.1.0",
+  "publisher": "erm-editor",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "erm-editor.open",
+        "title": "ERM Editor: Open",
+        "icon": "$(database)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "erm-editor.open" }
+      ]
+    }
+  },
+  "scripts": {
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0"
+  }
+}

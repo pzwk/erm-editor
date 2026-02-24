@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERM Editor</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+#toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; flex-wrap: wrap; }
+#toolbar h1 { font-size: 16px; font-weight: 700; color: #cba6f7; margin-right: 8px; }
+.btn { padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+.btn-primary { background: #cba6f7; color: #1e1e2e; }
+.btn-primary:hover { background: #d5b8ff; }
+.btn-secondary { background: #313244; color: #cdd6f4; }
+.btn-secondary:hover { background: #45475a; }
+.btn-tool { padding: 6px 12px; border: 2px solid transparent; border-radius: 6px; cursor: pointer; font-size: 13px; background: #313244; color: #cdd6f4; transition: all 0.15s; }
+.btn-tool.active { border-color: #cba6f7; background: #45475a; color: #cba6f7; }
+.btn-tool:hover:not(.active) { background: #45475a; }
+.sep { width: 1px; height: 24px; background: #45475a; margin: 0 2px; }
+.hint { font-size: 11px; color: #6c7086; margin-left: 8px; }
+
+#canvas-wrapper { flex: 1; position: relative; overflow: hidden; cursor: grab; }
+#canvas-wrapper.panning { cursor: grabbing; }
+#canvas-wrapper.relating { cursor: crosshair; }
+#canvas { position: absolute; width: 6000px; height: 6000px; }
+#svg-layer { position: absolute; top: 0; left: 0; width: 6000px; height: 6000px; pointer-events: none; overflow: visible; }
+#svg-layer.drawing { pointer-events: all; }
+
+/* Entity */
+.entity { position: absolute; background: #181825; border: 2px solid #45475a; border-radius: 8px; min-width: 210px; cursor: default; user-select: none; box-shadow: 0 4px 24px rgba(0,0,0,0.5); }
+.entity:hover { border-color: #585b70; }
+.entity.rel-source { border-color: #a6e3a1 !important; }
+.entity.rel-target-hover { border-color: #89b4fa !important; }
+.entity-header { background: #313244; padding: 7px 10px; border-radius: 6px 6px 0 0; display: flex; justify-content: space-between; align-items: center; cursor: move; border-bottom: 1px solid #45475a; }
+.entity-name { font-weight: 700; font-size: 13px; color: #cba6f7; letter-spacing: 0.3px; }
+.entity-btns { display: flex; gap: 3px; opacity: 0; transition: opacity 0.15s; }
+.entity:hover .entity-btns { opacity: 1; }
+.ebn { width: 18px; height: 18px; border: none; border-radius: 3px; cursor: pointer; font-size: 10px; display: flex; align-items: center; justify-content: center; line-height: 1; }
+.ebn-edit { background: #89b4fa; color: #1e1e2e; }
+.ebn-del { background: #f38ba8; color: #1e1e2e; }
+.entity-fields { padding: 3px 0; }
+.frow { padding: 4px 10px; display: flex; align-items: center; gap: 5px; font-size: 12px; border-left: 3px solid transparent; }
+.frow:hover { background: #252535; }
+.frow.is-pk { border-left-color: #f9e2af; }
+.frow.is-fk { border-left-color: #89b4fa; }
+.frow.is-pk.is-fk { border-left-color: #cba6f7; }
+.badge { font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px; flex-shrink: 0; }
+.pk-b { background: #f9e2af; color: #1e1e2e; }
+.fk-b { background: #89b4fa; color: #1e1e2e; }
+.fname { flex: 1; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftype { color: #585b70; font-size: 11px; white-space: nowrap; }
+.entity-add-field { padding: 4px 10px; font-size: 11px; color: #585b70; cursor: pointer; border-top: 1px solid #313244; text-align: center; transition: color 0.1s; }
+.entity-add-field:hover { color: #cba6f7; }
+
+/* Modal */
+.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 100; align-items: center; justify-content: center; }
+.overlay.open { display: flex; }
+.modal { background: #1e1e2e; border: 1px solid #45475a; border-radius: 12px; padding: 22px; min-width: 460px; max-width: 580px; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
+.modal h2 { font-size: 17px; color: #cba6f7; margin-bottom: 16px; }
+.fg { margin-bottom: 12px; }
+label { display: block; font-size: 11px; color: #a6adc8; margin-bottom: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+input[type=text], input[type=number], select { width: 100%; padding: 7px 10px; background: #313244; border: 1px solid #45475a; border-radius: 6px; color: #cdd6f4; font-size: 13px; outline: none; }
+input[type=text]:focus, input[type=number]:focus, select:focus { border-color: #cba6f7; }
+.fields-editor { margin: 10px 0; }
+.fe-row { display: flex; gap: 6px; align-items: center; padding: 6px; background: #252535; border-radius: 6px; margin-bottom: 5px; }
+.fe-row input, .fe-row select { padding: 4px 7px; font-size: 12px; }
+.cb-label { display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; font-size: 11px; color: #cdd6f4; }
+.cb-label input[type=checkbox] { width: auto; cursor: pointer; accent-color: #cba6f7; }
+.fe-del { background: #f38ba8; color: #1e1e2e; border: none; border-radius: 4px; cursor: pointer; padding: 3px 6px; font-size: 11px; flex-shrink: 0; }
+.fe-ref { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.fe-ref select, .fe-ref input { padding: 3px 6px; font-size: 11px; }
+.fe-ref-label { font-size: 10px; color: #6c7086; white-space: nowrap; }
+.mfooter { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #313244; }
+
+/* Rel modal */
+.rel-info-box { background: #252535; border-radius: 8px; padding: 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14px; }
+.rel-types { display: flex; gap: 8px; margin-bottom: 4px; }
+.rt-btn { flex: 1; padding: 10px 6px; border: 2px solid #45475a; border-radius: 8px; background: #252535; color: #cdd6f4; cursor: pointer; text-align: center; font-size: 12px; line-height: 1.5; transition: all 0.15s; }
+.rt-btn:hover { border-color: #585b70; }
+.rt-btn.sel { border-color: #cba6f7; background: #313244; color: #cba6f7; }
+.rt-label { font-size: 14px; font-weight: 700; }
+
+/* SQL modal */
+.sql-box { background: #0d1117; border: 1px solid #313244; border-radius: 6px; padding: 14px; font-family: 'Courier New', monospace; font-size: 12px; color: #a6e3a1; white-space: pre; overflow: auto; max-height: 420px; margin-top: 12px; line-height: 1.6; }
+
+/* Toast */
+#toast { position: fixed; bottom: 20px; right: 20px; background: #313244; border: 1px solid #45475a; border-radius: 8px; padding: 10px 16px; font-size: 13px; z-index: 300; transform: translateY(80px); opacity: 0; transition: transform 0.25s, opacity 0.25s; pointer-events: none; max-width: 280px; }
+#toast.show { transform: translateY(0); opacity: 1; }
+
+/* Relationship lines */
+.rel-line { stroke: #89b4fa; stroke-width: 2; fill: none; }
+.rel-label { fill: #6c7086; font-size: 11px; font-family: 'Segoe UI', sans-serif; }
+.rel-hit { stroke: transparent; stroke-width: 14; fill: none; cursor: pointer; pointer-events: stroke; }
+.card-symbol { stroke: #89b4fa; stroke-width: 2; fill: none; }
+#preview-path { stroke: #cba6f7; stroke-width: 1.5; stroke-dasharray: 6,3; fill: none; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>&#9741; ERM Editor</h1>
+  <button class="btn btn-primary" onclick="openNewEntityModal()">+ Entity</button>
+  <div class="sep"></div>
+  <button class="btn-tool" id="tool-select" onclick="setTool('select')">&#9654; Select</button>
+  <button class="btn-tool" id="tool-relate" onclick="setTool('relate')">&#8594; Relationship</button>
+  <div class="sep"></div>
+  <button class="btn btn-secondary" onclick="showSQL()">&#128196; SQL</button>
+  <button class="btn btn-secondary" onclick="saveJSON()">&#128190; Save</button>
+  <button class="btn btn-secondary" onclick="loadJSON()">&#128194; Load</button>
+  <span class="hint">E = new entity &nbsp;|&nbsp; R = relationship tool &nbsp;|&nbsp; ESC = cancel</span>
+</div>
+
+<div id="canvas-wrapper">
+  <div id="canvas">
+    <svg id="svg-layer" xmlns="http://www.w3.org/2000/svg">
+      <path id="preview-path" d="" style="display:none"/>
+    </svg>
+  </div>
+</div>
+
+<!-- Entity Modal -->
+<div class="overlay" id="entity-overlay">
+  <div class="modal">
+    <h2 id="em-title">New Entity</h2>
+    <div class="fg">
+      <label>Entity Name</label>
+      <input type="text" id="em-name" placeholder="e.g. Customer" autocomplete="off">
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <label style="margin:0;font-size:11px">Fields</label>
+      <button class="btn btn-secondary" style="font-size:11px;padding:4px 8px" onclick="addFieldRow()">+ Field</button>
+    </div>
+    <div class="fields-editor" id="fields-editor"></div>
+    <div class="mfooter">
+      <button class="btn btn-secondary" onclick="closeEntityModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEntity()">Save Entity</button>
+    </div>
+  </div>
+</div>
+
+<!-- Relationship Modal -->
+<div class="overlay" id="rel-overlay">
+  <div class="modal" style="min-width:400px">
+    <h2>Create Relationship</h2>
+    <div class="rel-info-box" id="rel-info-box"></div>
+    <div class="fg">
+      <label>Cardinality</label>
+      <div class="rel-types">
+        <div class="rt-btn" data-t="1:1" onclick="pickRelType('1:1')"><div class="rt-label">1 : 1</div><small>One to One</small></div>
+        <div class="rt-btn sel" data-t="1:N" onclick="pickRelType('1:N')"><div class="rt-label">1 : N</div><small>One to Many</small></div>
+        <div class="rt-btn" data-t="N:M" onclick="pickRelType('N:M')"><div class="rt-label">N : M</div><small>Many to Many</small></div>
+      </div>
+    </div>
+    <div class="fg" id="fk-name-group">
+      <label id="fk-name-label">FK Field Name (added to target table)</label>
+      <input type="text" id="fk-name-input" placeholder="e.g. customer_id">
+    </div>
+    <div class="mfooter">
+      <button class="btn btn-secondary" onclick="closeRelModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmRelationship()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- SQL Modal -->
+<div class="overlay" id="sql-overlay">
+  <div class="modal" style="min-width:600px">
+    <h2>&#128196; SQL Export (MySQL/MariaDB)</h2>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="copySQL()">Copy</button>
+      <button class="btn btn-secondary" onclick="downloadSQL()">Download .sql</button>
+    </div>
+    <pre class="sql-box" id="sql-box"></pre>
+    <div class="mfooter">
+      <button class="btn btn-secondary" onclick="document.getElementById('sql-overlay').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Relationship Modal -->
+<div class="overlay" id="rel-edit-overlay">
+  <div class="modal" style="min-width:400px">
+    <h2>Edit Relationship</h2>
+    <div class="rel-info-box" id="rel-edit-info"></div>
+    <div class="fg">
+      <label>Cardinality</label>
+      <div class="rel-types">
+        <div class="rt-btn" data-t="1:1" onclick="pickEditRelType('1:1')"><div class="rt-label">1 : 1</div><small>One to One</small></div>
+        <div class="rt-btn" data-t="1:N" onclick="pickEditRelType('1:N')"><div class="rt-label">1 : N</div><small>One to Many</small></div>
+        <div class="rt-btn" data-t="N:M" onclick="pickEditRelType('N:M')"><div class="rt-label">N : M</div><small>Many to Many</small></div>
+      </div>
+    </div>
+    <div class="mfooter" style="justify-content:space-between">
+      <button class="btn" style="background:#f38ba8;color:#1e1e2e" onclick="deleteRelFromEdit()">Delete</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="closeRelEditModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveRelEdit()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<input type="file" id="file-input" accept=".json" style="display:none" onchange="onFileLoad(event)">
+
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────
+let S = { entities: [], relationships: [] };
+let uid = 1;
+const id = () => uid++;
+
+// ── Tool / pan state ───────────────────────────────────────────────────────
+let tool = 'select';
+let panActive = false, panStart = {x:0,y:0}, panOrigin = {x:0,y:0};
+let offset = {x:0,y:0};
+let relFrom = null;       // entityId when drawing
+let pendingRel = null;    // {fromId, toId}
+let selRelType = '1:N';
+let editingId = null;
+let editingRelId = null;
+let rowCtr = 0;
+
+const wrap = document.getElementById('canvas-wrapper');
+const cvs  = document.getElementById('canvas');
+const svg  = document.getElementById('svg-layer');
+
+// ── Tool selector ──────────────────────────────────────────────────────────
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('.btn-tool').forEach(b => b.classList.remove('active'));
+  document.getElementById('tool-' + t).classList.add('active');
+  wrap.className = t === 'relate' ? 'relating' : '';
+  if (t !== 'relate') cancelRelDraw();
+}
+setTool('select');
+
+// ── Canvas pan ─────────────────────────────────────────────────────────────
+wrap.addEventListener('mousedown', e => {
+  if (tool !== 'select') return;
+  const tgt = e.target;
+  if (tgt === wrap || tgt === cvs || tgt.id === 'svg-layer') {
+    panActive = true;
+    panStart = {x: e.clientX, y: e.clientY};
+    panOrigin = {...offset};
+    wrap.classList.add('panning');
+  }
+});
+window.addEventListener('mousemove', e => {
+  if (panActive) {
+    offset.x = panOrigin.x + e.clientX - panStart.x;
+    offset.y = panOrigin.y + e.clientY - panStart.y;
+    cvs.style.transform = `translate(${offset.x}px,${offset.y}px)`;
+  }
+  if (relFrom !== null) updatePreview(e);
+});
+window.addEventListener('mouseup', () => { panActive = false; wrap.classList.remove('panning'); });
+
+// ── Entity modal ───────────────────────────────────────────────────────────
+function openNewEntityModal() {
+  editingId = null;
+  document.getElementById('em-title').textContent = 'New Entity';
+  document.getElementById('em-name').value = '';
+  document.getElementById('fields-editor').innerHTML = '';
+  addFieldRow({name:'id', type:'INT', pk:true, fk:false});
+  document.getElementById('entity-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('em-name').focus(), 50);
+}
+
+function openEditModal(eid) {
+  const ent = S.entities.find(e => e.id === eid);
+  if (!ent) return;
+  editingId = eid;
+  document.getElementById('em-title').textContent = 'Edit: ' + ent.name;
+  document.getElementById('em-name').value = ent.name;
+  document.getElementById('fields-editor').innerHTML = '';
+  ent.fields.forEach(f => addFieldRow(f));
+  document.getElementById('entity-overlay').classList.add('open');
+}
+
+function closeEntityModal() {
+  document.getElementById('entity-overlay').classList.remove('open');
+  editingId = null;
+}
+
+function addFieldRow(f = {}) {
+  const rid = rowCtr++;
+  const name = f.name || '';
+  const type = f.type || 'VARCHAR(255)';
+  const pk = f.pk || false;
+  const fk = f.fk || false;
+  const refEnt = f.refEnt || '';
+  const refField = f.refField || '';
+
+  const types = ['INT','UNSIGNED INT','VARCHAR(50)','VARCHAR(100)','VARCHAR(255)','DATE','FLOAT','TEXT','BOOLEAN','BIGINT'];
+
+  const wrap_div = document.createElement('div');
+  wrap_div.setAttribute('data-rid', rid);
+  wrap_div.innerHTML = `
+    <div class="fe-row">
+      <input type="text" class="fi-name" placeholder="field_name" value="${esc(name)}" style="flex:2;min-width:90px">
+      <select class="fi-type" style="flex:2;min-width:100px">
+        ${types.map(t=>`<option${t===type?' selected':''}>${t}</option>`).join('')}
+      </select>
+      <label class="cb-label"><input type="checkbox" class="fi-pk"${pk?' checked':''}> PK</label>
+      <label class="cb-label"><input type="checkbox" class="fi-fk"${fk?' checked':''}> FK</label>
+      <button class="fe-del" onclick="removeRow(${rid})">✕</button>
+    </div>
+    <div class="fe-ref" style="display:${fk?'flex':'none'};padding:0 6px 6px 6px;">
+      <span class="fe-ref-label">References:</span>
+      <select class="fi-ref-ent" style="flex:2;min-width:100px">
+        <option value="">-- Table --</option>
+        ${S.entities.filter(e=>e.id!==editingId).map(e=>`<option value="${e.id}"${e.id==refEnt?' selected':''}>${esc(e.name)}</option>`).join('')}
+      </select>
+      <input type="text" class="fi-ref-field" placeholder="field" value="${esc(refField)}" style="flex:1;min-width:60px">
+    </div>
+  `;
+  wrap_div.querySelector('.fi-fk').addEventListener('change', function() {
+    wrap_div.querySelector('.fe-ref').style.display = this.checked ? 'flex' : 'none';
+  });
+  document.getElementById('fields-editor').appendChild(wrap_div);
+}
+
+function removeRow(rid) {
+  const el = document.querySelector(`[data-rid="${rid}"]`);
+  if (el) el.remove();
+}
+
+function saveEntity() {
+  const name = document.getElementById('em-name').value.trim();
+  if (!name) { toast('Entity name required'); return; }
+
+  const fields = [];
+  document.querySelectorAll('#fields-editor [data-rid]').forEach(row => {
+    const fname = row.querySelector('.fi-name').value.trim();
+    if (!fname) return;
+    const isPK = row.querySelector('.fi-pk').checked;
+    const isFK = row.querySelector('.fi-fk').checked;
+    const refEntEl = row.querySelector('.fi-ref-ent');
+    const refFldEl = row.querySelector('.fi-ref-field');
+    fields.push({
+      id: id(),
+      name: fname,
+      type: row.querySelector('.fi-type').value,
+      pk: isPK, fk: isFK,
+      refEnt: isFK && refEntEl ? (refEntEl.value || '') : '',
+      refField: isFK && refFldEl ? refFldEl.value.trim() : ''
+    });
+  });
+
+  if (editingId !== null) {
+    const ent = S.entities.find(e => e.id === editingId);
+    ent.name = name;
+    ent.fields = fields;
+    // Drop relationships whose FK column was removed from this entity
+    S.relationships = S.relationships.filter(r =>
+      r.to !== ent.id || fields.some(f => f.fk && String(f.refEnt) === String(r.from))
+    );
+  } else {
+    S.entities.push({ id: id(), name, x: 100 + Math.random()*300, y: 80 + Math.random()*200, fields });
+  }
+  closeEntityModal();
+  render();
+}
+
+function deleteEntity(eid) {
+  if (!confirm('Delete entity and all its relationships?')) return;
+  S.entities = S.entities.filter(e => e.id !== eid);
+  S.relationships = S.relationships.filter(r => r.from !== eid && r.to !== eid);
+  render();
+}
+
+// ── Rendering ──────────────────────────────────────────────────────────────
+function render() {
+  renderEntities();
+  renderRelationships();
+}
+
+function renderEntities() {
+  const live = new Set(S.entities.map(e => e.id));
+  document.querySelectorAll('.entity').forEach(el => {
+    if (!live.has(+el.dataset.eid)) el.remove();
+  });
+  S.entities.forEach(ent => {
+    let el = document.querySelector(`.entity[data-eid="${ent.id}"]`);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'entity';
+      el.dataset.eid = ent.id;
+      el.style.left = ent.x + 'px';
+      el.style.top  = ent.y + 'px';
+      makeDraggable(el, ent);
+      el.addEventListener('click', ev => {
+        ev.stopPropagation();
+        if (tool === 'relate') handleEntityClick(ent.id, el);
+      });
+      el.addEventListener('mouseenter', () => {
+        if (tool === 'relate' && relFrom !== null && relFrom !== ent.id)
+          el.classList.add('rel-target-hover');
+      });
+      el.addEventListener('mouseleave', () => {
+        el.classList.remove('rel-target-hover');
+      });
+      cvs.appendChild(el);
+    }
+
+    el.innerHTML = `
+      <div class="entity-header">
+        <span class="entity-name">${esc(ent.name)}</span>
+        <div class="entity-btns">
+          <button class="ebn ebn-edit" onclick="event.stopPropagation();openEditModal(${ent.id})" title="Edit">✎</button>
+          <button class="ebn ebn-del"  onclick="event.stopPropagation();deleteEntity(${ent.id})" title="Delete">✕</button>
+        </div>
+      </div>
+      <div class="entity-fields">
+        ${ent.fields.map(f => `
+          <div class="frow${f.pk?' is-pk':''}${f.fk?' is-fk':''}">
+            ${f.pk ? '<span class="badge pk-b">PK</span>' : ''}
+            ${f.fk ? '<span class="badge fk-b">FK</span>' : ''}
+            <span class="fname">${esc(f.name)}</span>
+            <span class="ftype">${esc(f.type)}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="entity-add-field" onclick="event.stopPropagation();quickAddField(${ent.id})">+ field</div>
+    `;
+  });
+}
+
+function quickAddField(eid) {
+  openEditModal(eid);
+  setTimeout(() => addFieldRow(), 50);
+}
+
+function renderRelationships() {
+  svg.querySelectorAll('.rel-g').forEach(g => g.remove());
+  S.relationships.forEach(rel => {
+    const fromEl = document.querySelector(`.entity[data-eid="${rel.from}"]`);
+    const toEl   = document.querySelector(`.entity[data-eid="${rel.to}"]`);
+    if (!fromEl || !toEl) return;
+
+    const {p1, p2} = connPoints(fromEl, toEl);
+    const {d, ang1, ang2} = getBezierInfo(p1, p2);
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.className.baseVal = 'rel-g';
+
+    // Main line
+    const path = svgEl('path', {d, class:'rel-line', 'stroke-width':2});
+    g.appendChild(path);
+
+    // Cardinality symbols — angles come from actual bezier tangents at endpoints
+    const fromCard = rel.type === 'N:M' ? 'N' : '1';
+    const toCard   = rel.type === '1:1' ? '1' : 'N';
+    drawCard(g, p1, ang1, fromCard);
+    drawCard(g, p2, ang2, toCard);
+
+    // Label
+    const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+    const lbl = svgEl('text', {x:mx, y:my-8, 'text-anchor':'middle', class:'rel-label'});
+    lbl.textContent = rel.type;
+    g.appendChild(lbl);
+
+    // Hit area
+    const hit = svgEl('path', {d, class:'rel-hit'});
+    hit.addEventListener('click', ev => {
+      ev.stopPropagation();
+      openRelEditModal(rel.id);
+    });
+    hit.addEventListener('mouseenter', () => path.setAttribute('stroke','#cba6f7'));
+    hit.addEventListener('mouseleave', () => path.setAttribute('stroke','#89b4fa'));
+    g.appendChild(hit);
+
+    svg.appendChild(g);
+  });
+}
+
+function drawCard(g, p, angle, type) {
+  const dist = 18;
+  const cx = p.x + Math.cos(angle) * dist;
+  const cy = p.y + Math.sin(angle) * dist;
+  const px = Math.cos(angle + Math.PI/2);
+  const py = Math.sin(angle + Math.PI/2);
+  const arm = 7;
+  const bx = Math.cos(angle + Math.PI) * 8;
+  const by = Math.sin(angle + Math.PI) * 8;
+
+  if (type === '1') {
+    // Single vertical bar
+    const bar = svgEl('line', {
+      x1: cx - px*arm, y1: cy - py*arm,
+      x2: cx + px*arm, y2: cy + py*arm,
+      class:'card-symbol'
+    });
+    g.appendChild(bar);
+  } else {
+    // Crow's foot
+    const cf = svgEl('path', {
+      d: `M${cx-px*arm},${cy-py*arm} L${cx+bx},${cy+by} M${cx+px*arm},${cy+py*arm} L${cx+bx},${cy+by}`,
+      class:'card-symbol'
+    });
+    const bar = svgEl('line', {
+      x1: cx+bx-px*arm, y1: cy+by-py*arm,
+      x2: cx+bx+px*arm, y2: cy+by+py*arm,
+      class:'card-symbol'
+    });
+    g.appendChild(cf);
+    g.appendChild(bar);
+  }
+}
+
+// ── Geometry helpers ───────────────────────────────────────────────────────
+function connPoints(a, b) {
+  const ac = {x: a.offsetLeft + a.offsetWidth/2,  y: a.offsetTop + a.offsetHeight/2};
+  const bc = {x: b.offsetLeft + b.offsetWidth/2,  y: b.offsetTop + b.offsetHeight/2};
+  return { p1: edgePoint(a, bc.x-ac.x, bc.y-ac.y), p2: edgePoint(b, ac.x-bc.x, ac.y-bc.y) };
+}
+function edgePoint(el, dx, dy) {
+  const cx = el.offsetLeft + el.offsetWidth/2;
+  const cy = el.offsetTop  + el.offsetHeight/2;
+  const hw = el.offsetWidth/2, hh = el.offsetHeight/2;
+  if (Math.abs(dx)*hh > Math.abs(dy)*hw) {
+    const sx = dx > 0 ? 1 : -1;
+    return { x: cx + sx*hw, y: cy + dy*sx*hw/Math.abs(dx), nx: sx, ny: 0 };
+  } else {
+    const sy = dy > 0 ? 1 : -1;
+    return { x: cx + dx*sy*hh/Math.abs(dy), y: cy + sy*hh, nx: 0, ny: sy };
+  }
+}
+// Returns the bezier path AND the tangent angles at each endpoint so that
+// cardinality symbols can be drawn flush against the curve.
+function getBezierInfo(p1, p2) {
+  const stub = 50;
+  const c1x = p1.x + stub * p1.nx, c1y = p1.y + stub * p1.ny;
+  const c2x = p2.x + stub * p2.nx, c2y = p2.y + stub * p2.ny;
+  const d = `M${p1.x},${p1.y} C${c1x},${c1y} ${c2x},${c2y} ${p2.x},${p2.y}`;
+  return { d, ang1: Math.atan2(p1.ny, p1.nx), ang2: Math.atan2(p2.ny, p2.nx) };
+}
+function svgEl(tag, attrs={}) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k,v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+// ── Drag ───────────────────────────────────────────────────────────────────
+function makeDraggable(el, ent) {
+  let active = false, sx, sy, ox, oy;
+  el.addEventListener('mousedown', e => {
+    if (tool !== 'select') return;
+    if (e.target.classList.contains('ebn')) return;
+    if (e.target.classList.contains('entity-add-field')) return;
+    e.stopPropagation();
+    active = true; sx = e.clientX; sy = e.clientY; ox = ent.x; oy = ent.y;
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+  function onMove(e) {
+    if (!active) return;
+    ent.x = ox + e.clientX - sx;
+    ent.y = oy + e.clientY - sy;
+    el.style.left = ent.x + 'px';
+    el.style.top  = ent.y + 'px';
+    renderRelationships();
+  }
+  function onUp() {
+    active = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+}
+
+// ── Relationship drawing ───────────────────────────────────────────────────
+function handleEntityClick(eid, el) {
+  if (relFrom === null) {
+    relFrom = eid;
+    el.classList.add('rel-source');
+    toast('Now click the target entity');
+    svg.classList.add('drawing');
+  } else if (relFrom === eid) {
+    cancelRelDraw();
+    toast('Cancelled');
+  } else {
+    const fromId = relFrom;
+    const toId   = eid;
+    cancelRelDraw();
+    openRelModal(fromId, toId);
+  }
+}
+
+function cancelRelDraw() {
+  relFrom = null;
+  document.querySelectorAll('.entity').forEach(e => {
+    e.classList.remove('rel-source', 'rel-target-hover');
+  });
+  document.getElementById('preview-path').style.display = 'none';
+  svg.classList.remove('drawing');
+}
+
+function updatePreview(e) {
+  if (relFrom === null) return;
+  const fromEl = document.querySelector(`.entity[data-eid="${relFrom}"]`);
+  if (!fromEl) return;
+  const r = wrap.getBoundingClientRect();
+  const mx = e.clientX - r.left - offset.x;
+  const my = e.clientY - r.top  - offset.y;
+  const c  = {x: fromEl.offsetLeft + fromEl.offsetWidth/2, y: fromEl.offsetTop + fromEl.offsetHeight/2};
+  const pp = document.getElementById('preview-path');
+  pp.setAttribute('d', `M${c.x},${c.y} L${mx},${my}`);
+  pp.style.display = 'block';
+}
+
+// ── Rel modal ──────────────────────────────────────────────────────────────
+function openRelModal(fromId, toId) {
+  pendingRel = {fromId, toId};
+  const fromEnt = S.entities.find(e => e.id === fromId);
+  const toEnt   = S.entities.find(e => e.id === toId);
+  document.getElementById('rel-info-box').innerHTML =
+    `<strong style="color:#cba6f7">${esc(fromEnt.name)}</strong>
+     <span style="color:#45475a;font-size:20px">⟶</span>
+     <strong style="color:#89b4fa">${esc(toEnt.name)}</strong>`;
+  selRelType = '1:N';
+  pickRelType('1:N');
+  document.getElementById('fk-name-input').value = fromEnt.name.toLowerCase() + '_id';
+  document.getElementById('rel-overlay').classList.add('open');
+}
+
+function closeRelModal() {
+  document.getElementById('rel-overlay').classList.remove('open');
+  pendingRel = null;
+}
+
+function pickRelType(t) {
+  selRelType = t;
+  document.querySelectorAll('.rt-btn').forEach(b => b.classList.toggle('sel', b.dataset.t === t));
+  const grp = document.getElementById('fk-name-group');
+  const lbl = document.getElementById('fk-name-label');
+  const inp = document.getElementById('fk-name-input');
+  if (t === 'N:M') {
+    lbl.textContent = 'Junction table will be auto-created';
+    inp.style.display = 'none';
+  } else if (t === '1:N') {
+    lbl.textContent = 'FK field name (added to N-side table)';
+    inp.style.display = 'block';
+  } else {
+    lbl.textContent = 'FK field name (added to target table)';
+    inp.style.display = 'block';
+  }
+}
+
+function confirmRelationship() {
+  if (!pendingRel) return;
+  const {fromId, toId} = pendingRel;
+  const fromEnt = S.entities.find(e => e.id === fromId);
+  const toEnt   = S.entities.find(e => e.id === toId);
+  const fkName  = document.getElementById('fk-name-input').value.trim() || fromEnt.name.toLowerCase()+'_id';
+
+  if (selRelType === 'N:M') {
+    // Auto-create junction table
+    const jName = fromEnt.name + '_' + toEnt.name;
+    const fromPK = fromEnt.fields.find(f => f.pk);
+    const toPK   = toEnt.fields.find(f => f.pk);
+    const jEnt = {
+      id: id(), name: jName,
+      x: (fromEnt.x + toEnt.x)/2 + 20,
+      y: Math.max(fromEnt.y, toEnt.y) + 160,
+      fields: [
+        { id:id(), name: fromEnt.name.toLowerCase()+'_id', type:'INT', pk:true, fk:true, refEnt:fromId, refField:fromPK?.name||'id' },
+        { id:id(), name: toEnt.name.toLowerCase()+'_id',   type:'INT', pk:true, fk:true, refEnt:toId,   refField:toPK?.name||'id'   }
+      ]
+    };
+    S.entities.push(jEnt);
+    S.relationships.push({ id:id(), from:fromId, to:jEnt.id, type:'1:N' });
+    S.relationships.push({ id:id(), from:toId,   to:jEnt.id, type:'1:N' });
+    closeRelModal();
+    render();
+    toast(`Junction table "${jName}" created`);
+    return;
+  }
+
+  // Add FK to target (N side for 1:N, toEnt for 1:1)
+  addFKtoEntity(toEnt, fkName, fromId, fromEnt.fields.find(f=>f.pk)?.name||'id');
+
+  S.relationships.push({ id:id(), from:fromId, to:toId, type:selRelType });
+  closeRelModal();
+  render();
+  toast('Relationship created');
+}
+
+function addFKtoEntity(ent, fieldName, refEntId, refFieldName) {
+  if (ent.fields.find(f => f.name === fieldName)) return; // already exists
+  ent.fields.push({ id:id(), name:fieldName, type:'INT', pk:false, fk:true, refEnt:refEntId, refField:refFieldName });
+}
+
+// ── SQL Export ─────────────────────────────────────────────────────────────
+function buildSQL() {
+  const date = new Date().toISOString().slice(0, 10);
+  let sql = `-- Generated by ERM Editor on ${date}\n`;
+  sql += '-- MariaDB / MySQL\n\n';
+  sql += 'SET FOREIGN_KEY_CHECKS=0;\n\n';
+
+  // FK-safe order: put referenced tables first
+  const ordered = topoSort(S.entities, S.relationships);
+  ordered.forEach(ent => {
+    sql += `CREATE TABLE \`${ent.name}\` (\n`;
+    const lines = [];
+    const pks   = [];
+
+    // Column definitions
+    ent.fields.forEach(f => {
+      let t = f.type === 'UNSIGNED INT' ? 'INT UNSIGNED' : f.type;
+      let col = `  \`${f.name}\` ${t}`;
+      if (f.pk) {
+        col += ' NOT NULL';
+        // composite PK / FK columns (junction tables) must not be AUTO_INCREMENT
+        if (/^(INT|BIGINT)/i.test(t) && !f.fk) col += ' AUTO_INCREMENT';
+        pks.push(`\`${f.name}\``);
+      } else if (f.fk) {
+        col += ' NOT NULL';
+      }
+      lines.push(col);
+    });
+
+    // PRIMARY KEY
+    if (pks.length) lines.push(`  PRIMARY KEY (${pks.join(', ')})`);
+
+    // UNIQUE / INDEX for FK columns
+    ent.fields.filter(f => f.fk && f.refEnt && !f.pk).forEach(f => {
+      // A 1:1 FK must be UNIQUE; a 1:N FK only needs an INDEX
+      const rel = S.relationships.find(r => r.to === ent.id && r.from == f.refEnt);
+      if (rel && rel.type === '1:1') {
+        lines.push(`  UNIQUE KEY \`uq_${ent.name}_${f.name}\` (\`${f.name}\`)`);
+      } else {
+        lines.push(`  INDEX \`idx_${ent.name}_${f.name}\` (\`${f.name}\`)`);
+      }
+    });
+
+    // FOREIGN KEY constraints
+    ent.fields.filter(f => f.fk && f.refEnt).forEach(f => {
+      const refEnt = S.entities.find(e => e.id == f.refEnt);
+      if (refEnt)
+        lines.push(
+          `  CONSTRAINT \`fk_${ent.name}_${f.name}\`\n` +
+          `    FOREIGN KEY (\`${f.name}\`) REFERENCES \`${refEnt.name}\`(\`${f.refField||'id'}\`)\n` +
+          `    ON DELETE RESTRICT ON UPDATE CASCADE`
+        );
+    });
+
+    sql += lines.join(',\n') + '\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;\n\n';
+  });
+
+  sql += 'SET FOREIGN_KEY_CHECKS=1;\n';
+  return sql;
+}
+
+function topoSort(entities, rels) {
+  // Very simple: put tables with FK deps after their refs
+  const order = [...entities];
+  for (let i = 0; i < order.length * 2; i++) {
+    let swapped = false;
+    for (let j = 0; j < order.length; j++) {
+      const ent = order[j];
+      const hasFKto = ent.fields.filter(f => f.fk && f.refEnt).map(f => f.refEnt);
+      for (const refId of hasFKto) {
+        const refIdx = order.findIndex(e => e.id == refId);
+        if (refIdx > j) {
+          [order[j], order[refIdx]] = [order[refIdx], order[j]];
+          swapped = true; break;
+        }
+      }
+      if (swapped) break;
+    }
+    if (!swapped) break;
+  }
+  return order;
+}
+
+function showSQL() {
+  document.getElementById('sql-box').textContent = buildSQL();
+  document.getElementById('sql-overlay').classList.add('open');
+}
+
+function copySQL() {
+  navigator.clipboard.writeText(document.getElementById('sql-box').textContent)
+    .then(() => toast('Copied!'));
+}
+
+function downloadSQL() {
+  const blob = new Blob([document.getElementById('sql-box').textContent], {type:'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'schema.sql';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── Save / Load ────────────────────────────────────────────────────────────
+function saveJSON() {
+  const blob = new Blob([JSON.stringify({S, uid}, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'erm-diagram.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Saved');
+}
+
+function loadJSON() { document.getElementById('file-input').click(); }
+
+function onFileLoad(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      S = data.S;
+      uid = data.uid || uid;
+      document.querySelectorAll('.entity').forEach(el => el.remove());
+      render();
+      toast('Loaded');
+    } catch { toast('Failed to load file'); }
+  };
+  r.readAsText(f);
+  e.target.value = '';
+}
+
+// ── Edit Relationship modal ────────────────────────────────────────────────
+function openRelEditModal(relId) {
+  const rel = S.relationships.find(r => r.id === relId);
+  if (!rel) return;
+  editingRelId = relId;
+  const fromEnt = S.entities.find(e => e.id === rel.from);
+  const toEnt   = S.entities.find(e => e.id === rel.to);
+  document.getElementById('rel-edit-info').innerHTML =
+    `<strong style="color:#cba6f7">${esc(fromEnt.name)}</strong>
+     <span style="color:#45475a;font-size:20px">⟶</span>
+     <strong style="color:#89b4fa">${esc(toEnt.name)}</strong>`;
+  document.querySelectorAll('#rel-edit-overlay .rt-btn').forEach(b =>
+    b.classList.toggle('sel', b.dataset.t === rel.type)
+  );
+  document.getElementById('rel-edit-overlay').classList.add('open');
+}
+
+function closeRelEditModal() {
+  document.getElementById('rel-edit-overlay').classList.remove('open');
+  editingRelId = null;
+}
+
+function pickEditRelType(t) {
+  document.querySelectorAll('#rel-edit-overlay .rt-btn').forEach(b =>
+    b.classList.toggle('sel', b.dataset.t === t)
+  );
+}
+
+function saveRelEdit() {
+  if (editingRelId === null) return;
+  const rel = S.relationships.find(r => r.id === editingRelId);
+  if (!rel) return;
+  const sel = document.querySelector('#rel-edit-overlay .rt-btn.sel');
+  if (sel) rel.type = sel.dataset.t;
+  closeRelEditModal();
+  render();
+  toast('Relationship updated');
+}
+
+function deleteRelFromEdit() {
+  if (editingRelId === null) return;
+  S.relationships = S.relationships.filter(r => r.id !== editingRelId);
+  closeRelEditModal();
+  render();
+  toast('Relationship deleted');
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+let _toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// ── Keyboard shortcuts ─────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (e.key === 'Escape') {
+    cancelRelDraw();
+    closeEntityModal();
+    closeRelModal();
+    closeRelEditModal();
+    document.querySelectorAll('.overlay.open').forEach(o => o.classList.remove('open'));
+  }
+  if (e.key === 'e' && !e.ctrlKey) openNewEntityModal();
+  if (e.key === 'r' && !e.ctrlKey) setTool(tool === 'relate' ? 'select' : 'relate');
+});
+
+// ── Demo data ──────────────────────────────────────────────────────────────
+(function demo() {
+  const cId = id(), oId = id(), pId = id();
+  S.entities = [
+    {
+      id: cId, name: 'Customer', x: 60, y: 80,
+      fields: [
+        {id:id(), name:'id',         type:'INT',          pk:true,  fk:false},
+        {id:id(), name:'first_name', type:'VARCHAR(100)', pk:false, fk:false},
+        {id:id(), name:'last_name',  type:'VARCHAR(100)', pk:false, fk:false},
+        {id:id(), name:'email',      type:'VARCHAR(255)', pk:false, fk:false},
+        {id:id(), name:'birth_date', type:'DATE',         pk:false, fk:false}
+      ]
+    },
+    {
+      id: oId, name: 'Order', x: 360, y: 60,
+      fields: [
+        {id:id(), name:'id',          type:'INT',   pk:true,  fk:false},
+        {id:id(), name:'customer_id', type:'INT',   pk:false, fk:true,  refEnt:cId, refField:'id'},
+        {id:id(), name:'order_date',  type:'DATE',  pk:false, fk:false},
+        {id:id(), name:'total',       type:'FLOAT', pk:false, fk:false}
+      ]
+    },
+    {
+      id: pId, name: 'Product', x: 360, y: 310,
+      fields: [
+        {id:id(), name:'id',    type:'INT',          pk:true,  fk:false},
+        {id:id(), name:'name',  type:'VARCHAR(255)', pk:false, fk:false},
+        {id:id(), name:'price', type:'FLOAT',        pk:false, fk:false},
+        {id:id(), name:'stock', type:'UNSIGNED INT', pk:false, fk:false}
+      ]
+    }
+  ];
+  S.relationships = [
+    {id:id(), from:cId, to:oId, type:'1:N'}
+  ];
+  render();
+})();
+</script>
+</body>
+</html>

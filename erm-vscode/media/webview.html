@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src {{cspSource}} 'unsafe-inline';
+               script-src 'nonce-{{nonce}}';">
+<link rel="stylesheet" href="{{styleUri}}">
+<title>ERM Editor</title>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>&#9741; ERM Editor</h1>
+  <button class="btn btn-primary" onclick="openNewEntityModal()">+ Entity</button>
+  <div class="sep"></div>
+  <button class="btn-tool" id="tool-select" onclick="setTool('select')">&#9654; Select</button>
+  <button class="btn-tool" id="tool-relate" onclick="setTool('relate')">&#8594; Relationship</button>
+  <div class="sep"></div>
+  <button class="btn btn-secondary" onclick="showSQL()">&#128196; SQL</button>
+  <button class="btn btn-secondary" onclick="saveJSON()">&#128190; Save</button>
+  <button class="btn btn-secondary" onclick="loadJSON()">&#128194; Load</button>
+  <span class="hint">E = new entity &nbsp;|&nbsp; R = relationship tool &nbsp;|&nbsp; ESC = cancel</span>
+</div>
+
+<div id="canvas-wrapper">
+  <div id="canvas">
+    <svg id="svg-layer" xmlns="http://www.w3.org/2000/svg">
+      <path id="preview-path" d="" style="display:none"/>
+    </svg>
+  </div>
+</div>
+
+<!-- Entity Modal -->
+<div class="overlay" id="entity-overlay">
+  <div class="modal">
+    <h2 id="em-title">New Entity</h2>
+    <div class="fg">
+      <label>Entity Name</label>
+      <input type="text" id="em-name" placeholder="e.g. Customer" autocomplete="off">
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <label style="margin:0;font-size:11px">Fields</label>
+      <button class="btn btn-secondary" style="font-size:11px;padding:4px 8px" onclick="addFieldRow()">+ Field</button>
+    </div>
+    <div class="fields-editor" id="fields-editor"></div>
+    <div class="mfooter">
+      <button class="btn btn-secondary" onclick="closeEntityModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEntity()">Save Entity</button>
+    </div>
+  </div>
+</div>
+
+<!-- Relationship Modal -->
+<div class="overlay" id="rel-overlay">
+  <div class="modal" style="min-width:400px">
+    <h2>Create Relationship</h2>
+    <div class="rel-info-box" id="rel-info-box"></div>
+    <div class="fg">
+      <label>Cardinality</label>
+      <div class="rel-types">
+        <div class="rt-btn" data-t="1:1" onclick="pickRelType('1:1')"><div class="rt-label">1 : 1</div><small>One to One</small></div>
+        <div class="rt-btn sel" data-t="1:N" onclick="pickRelType('1:N')"><div class="rt-label">1 : N</div><small>One to Many</small></div>
+        <div class="rt-btn" data-t="N:M" onclick="pickRelType('N:M')"><div class="rt-label">N : M</div><small>Many to Many</small></div>
+      </div>
+    </div>
+    <div class="fg" id="fk-name-group">
+      <label id="fk-name-label">FK Field Name (added to target table)</label>
+      <input type="text" id="fk-name-input" placeholder="e.g. customer_id">
+    </div>
+    <div class="mfooter">
+      <button class="btn btn-secondary" onclick="closeRelModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmRelationship()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- SQL Modal -->
+<div class="overlay" id="sql-overlay">
+  <div class="modal" style="min-width:600px">
+    <h2>&#128196; SQL Export (MariaDB)</h2>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="copySQL()">Copy</button>
+      <button class="btn btn-secondary" onclick="exportSQL()">Export .sql</button>
+    </div>
+    <pre class="sql-box" id="sql-box"></pre>
+    <div class="mfooter">
+      <button class="btn btn-secondary" onclick="document.getElementById('sql-overlay').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Relationship Modal -->
+<div class="overlay" id="rel-edit-overlay">
+  <div class="modal" style="min-width:400px">
+    <h2>Edit Relationship</h2>
+    <div class="rel-info-box" id="rel-edit-info"></div>
+    <div class="fg">
+      <label>Cardinality</label>
+      <div class="rel-types">
+        <div class="rt-btn" data-t="1:1" onclick="pickEditRelType('1:1')"><div class="rt-label">1 : 1</div><small>One to One</small></div>
+        <div class="rt-btn" data-t="1:N" onclick="pickEditRelType('1:N')"><div class="rt-label">1 : N</div><small>One to Many</small></div>
+        <div class="rt-btn" data-t="N:M" onclick="pickEditRelType('N:M')"><div class="rt-label">N : M</div><small>Many to Many</small></div>
+      </div>
+    </div>
+    <div class="mfooter" style="justify-content:space-between">
+      <button class="btn" style="background:#f38ba8;color:#1e1e2e" onclick="deleteRelFromEdit()">Delete</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="closeRelEditModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveRelEdit()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>
