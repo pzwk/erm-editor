@@ -108,6 +108,7 @@ input[type=text]:focus, input[type=number]:focus, select:focus { border-color: #
   <button class="btn-tool" id="tool-relate" onclick="setTool('relate')">&#8594; Relationship</button>
   <div class="sep"></div>
   <button class="btn btn-secondary" onclick="showSQL()">&#128196; SQL</button>
+  <button class="btn btn-secondary" onclick="openImportModal()">&#128229; Import SQL</button>
   <button class="btn btn-secondary" onclick="saveJSON()">&#128190; Save</button>
   <button class="btn btn-secondary" onclick="loadJSON()">&#128194; Load</button>
   <span class="hint">E = new entity &nbsp;|&nbsp; R = relationship tool &nbsp;|&nbsp; ESC = cancel</span>
@@ -176,6 +177,19 @@ input[type=text]:focus, input[type=number]:focus, select:focus { border-color: #
     <pre class="sql-box" id="sql-box"></pre>
     <div class="mfooter">
       <button class="btn btn-secondary" onclick="document.getElementById('sql-overlay').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import SQL Modal -->
+<div class="overlay" id="import-overlay">
+  <div class="modal" style="min-width:600px">
+    <h2>&#128229; Import SQL (MySQL / MariaDB)</h2>
+    <p style="font-size:12px;color:#585b70;margin-bottom:10px">Paste a CREATE TABLE script to reverse-engineer the schema into an ERM diagram.</p>
+    <textarea id="import-box" style="width:100%;height:280px;background:#0d1117;border:1px solid #313244;border-radius:6px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#a6e3a1;resize:vertical;box-sizing:border-box" placeholder="CREATE TABLE `users` (&#10;  `id` INT NOT NULL AUTO_INCREMENT,&#10;  `name` VARCHAR(255) NOT NULL,&#10;  PRIMARY KEY (`id`)&#10;);"></textarea>
+    <div class="mfooter">
+      <button class="btn btn-secondary" onclick="document.getElementById('import-overlay').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="doImport()">Import</button>
     </div>
   </div>
 </div>
@@ -820,6 +834,125 @@ function downloadSQL() {
   a.download = 'schema.sql';
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+// ── Import SQL ──────────────────────────────────────────────────────────────
+function openImportModal() {
+  document.getElementById('import-box').value = '';
+  document.getElementById('import-overlay').classList.add('open');
+}
+
+function doImport() {
+  const sql = document.getElementById('import-box').value.trim();
+  if (!sql) { toast('Paste some SQL first'); return; }
+  let result;
+  try { result = parseDDL(sql); } catch(e) { toast('Parse error: ' + e.message); return; }
+  if (result.entities.length === 0) { toast('No CREATE TABLE statements found'); return; }
+  if (S.entities.length > 0 && !confirm(`Replace current diagram with ${result.entities.length} imported table(s)?`)) return;
+  S.entities = result.entities;
+  S.relationships = result.relationships;
+  document.getElementById('import-overlay').classList.remove('open');
+  render();
+  toast(`Imported ${result.entities.length} table(s), ${result.relationships.length} relationship(s)`);
+}
+
+function parseDDL(sql) {
+  // Strip comments
+  sql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
+
+  const entities = [];
+  const pendingFKs = [];
+
+  const tableRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?\s*\(([\s\S]*?)\)\s*[^;]*?(?:;|$)/gi;
+  let m;
+  while ((m = tableRe.exec(sql)) !== null) {
+    const tableName = m[1];
+    const body = m[2];
+
+    // Split clauses by comma at paren-depth 0
+    const clauses = [];
+    let depth = 0, cur = '';
+    for (const ch of body) {
+      if (ch === '(') { depth++; cur += ch; }
+      else if (ch === ')') { depth--; cur += ch; }
+      else if (ch === ',' && depth === 0) { clauses.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    if (cur.trim()) clauses.push(cur.trim());
+
+    const rawFields = [];
+    const pkCols = new Set();
+    const fkCols = {};
+
+    for (const clause of clauses) {
+      const c = clause.trim();
+      if (!c) continue;
+
+      if (/^PRIMARY\s+KEY/i.test(c)) {
+        const pkM = c.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i);
+        if (pkM) pkM[1].split(',').map(s => s.trim().replace(/`/g, '')).forEach(col => pkCols.add(col));
+        continue;
+      }
+      if (/FOREIGN\s+KEY/i.test(c)) {
+        const fkM = c.match(/FOREIGN\s+KEY\s*\(`?(\w+)`?\)\s*REFERENCES\s*`?(\w+)`?\s*\(`?(\w+)`?\)/i);
+        if (fkM) { fkCols[fkM[1]] = { toTable: fkM[2], toCol: fkM[3] }; pendingFKs.push({ fromTable: tableName, fromCol: fkM[1], toTable: fkM[2], toCol: fkM[3] }); }
+        continue;
+      }
+      if (/^(?:UNIQUE\s+)?(?:KEY|INDEX)\b/i.test(c)) continue;
+
+      const colM = c.match(/^`?(\w+)`?\s+([\w]+(?:\s*\([^)]*\))?)\s*(UNSIGNED\b)?/i);
+      if (!colM) continue;
+      const colName = colM[1];
+      let rawType = colM[2].trim() + (colM[3] ? ' UNSIGNED' : '');
+      const notNull = /NOT\s+NULL/i.test(c);
+      const inlinePK = /\bPRIMARY\s+KEY\b/i.test(c);
+      if (inlinePK) pkCols.add(colName);
+      rawFields.push({ colName, rawType, notNull });
+    }
+
+    const entId = id();
+    const fields = rawFields.map(f => {
+      const isPK = pkCols.has(f.colName);
+      const isFKCol = f.colName in fkCols;
+      const type = mapImportedType(f.rawType);
+      return { id: id(), name: f.colName, type, pk: isPK, fk: isFKCol, nn: !isPK && !isFKCol && type !== 'TIMESTAMP' && f.notNull, refEnt: '', refField: '' };
+    });
+    entities.push({ _id: entId, name: tableName, fields });
+  }
+
+  // Build entity name→id map and wire up FK refs + relationships
+  const nameToEnt = {};
+  entities.forEach(e => { nameToEnt[e.name] = e; });
+  const relationships = [];
+  for (const fk of pendingFKs) {
+    const fromEnt = nameToEnt[fk.fromTable];
+    const toEnt   = nameToEnt[fk.toTable];
+    if (!fromEnt || !toEnt) continue;
+    const fkField = fromEnt.fields.find(f => f.name === fk.fromCol);
+    if (fkField) { fkField.refEnt = toEnt._id; fkField.refField = fk.toCol; }
+    relationships.push({ id: id(), from: toEnt._id, to: fromEnt._id, type: '1:N' });
+  }
+
+  // Grid layout
+  const finalEntities = entities.map((e, i) => ({ id: e._id, name: e.name, x: 40 + (i % 3) * 300, y: 40 + Math.floor(i / 3) * 240, fields: e.fields }));
+  return { entities: finalEntities, relationships };
+}
+
+function mapImportedType(raw) {
+  const r = raw.toUpperCase().replace(/\s+/g, ' ').trim();
+  if (r === 'INT UNSIGNED' || r === 'INTEGER UNSIGNED') return 'UNSIGNED INT';
+  if (/^(INT|INTEGER)$/.test(r)) return 'INT';
+  if (/^BIGINT/.test(r)) return 'BIGINT';
+  if (/^VARCHAR\s*\(\s*50\s*\)$/.test(r)) return 'VARCHAR(50)';
+  if (/^VARCHAR\s*\(\s*100\s*\)$/.test(r)) return 'VARCHAR(100)';
+  if (/^VARCHAR/.test(r)) return 'VARCHAR(255)';
+  if (/^(TINYTEXT|MEDIUMTEXT|LONGTEXT|TEXT)/.test(r)) return 'TEXT';
+  if (/^DATE$/.test(r)) return 'DATE';
+  if (/^DATETIME/.test(r)) return 'DATE';
+  if (/^TIMESTAMP/.test(r)) return 'TIMESTAMP';
+  if (/^(FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)/.test(r)) return 'FLOAT';
+  if (/^(BOOL|BOOLEAN|TINYINT\s*\(\s*1\s*\))/.test(r)) return 'BOOLEAN';
+  return raw.trim();
 }
 
 // ── Save / Load ────────────────────────────────────────────────────────────

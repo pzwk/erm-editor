@@ -20,6 +20,7 @@
   <button class="btn-tool" id="tool-relate" onclick="setTool('relate')">&#8594; Relationship</button>
   <div class="sep"></div>
   <button class="btn btn-secondary" onclick="showSQL()">&#128196; SQL</button>
+  <button class="btn btn-secondary" onclick="openImportModal()">&#128229; Import SQL</button>
   <button class="btn btn-secondary" onclick="saveJSON()">&#128190; Save</button>
   <button class="btn btn-secondary" onclick="loadJSON()">&#128194; Load</button>
   <span class="hint">E = new entity &nbsp;|&nbsp; R = relationship tool &nbsp;|&nbsp; ESC = cancel</span>
@@ -88,6 +89,19 @@
     <pre class="sql-box" id="sql-box"></pre>
     <div class="mfooter">
       <button class="btn btn-secondary" onclick="document.getElementById('sql-overlay').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import SQL Modal -->
+<div class="overlay" id="import-overlay">
+  <div class="modal" style="min-width:600px">
+    <h2>&#128229; Import SQL (MySQL / MariaDB)</h2>
+    <p style="font-size:12px;color:#585b70;margin-bottom:10px">Paste a CREATE TABLE script to reverse-engineer the schema into an ERM diagram.</p>
+    <textarea id="import-box" style="width:100%;height:280px;background:#0d1117;border:1px solid #313244;border-radius:6px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#a6e3a1;resize:vertical;box-sizing:border-box" placeholder="CREATE TABLE `users` (&#10;  `id` INT NOT NULL AUTO_INCREMENT,&#10;  `name` VARCHAR(255) NOT NULL,&#10;  PRIMARY KEY (`id`)&#10;);"></textarea>
+    <div class="mfooter">
+      <button class="btn btn-secondary" onclick="document.getElementById('import-overlay').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="doImport()">Import</button>
     </div>
   </div>
 </div>

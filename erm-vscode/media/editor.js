@@ -596,6 +596,121 @@ function exportSQL() {
   vscode.postMessage({ type: 'exportSQL', data: document.getElementById('sql-box').textContent });
 }
 
+// ── Import SQL ──────────────────────────────────────────────────────────────
+function openImportModal() {
+  document.getElementById('import-box').value = '';
+  document.getElementById('import-overlay').classList.add('open');
+}
+
+function doImport() {
+  const sql = document.getElementById('import-box').value.trim();
+  if (!sql) { toast('Paste some SQL first'); return; }
+  let result;
+  try { result = parseDDL(sql); } catch(e) { toast('Parse error: ' + e.message); return; }
+  if (result.entities.length === 0) { toast('No CREATE TABLE statements found'); return; }
+  if (S.entities.length > 0 && !confirm(`Replace current diagram with ${result.entities.length} imported table(s)?`)) return;
+  S.entities = result.entities;
+  S.relationships = result.relationships;
+  document.getElementById('import-overlay').classList.remove('open');
+  render();
+  toast(`Imported ${result.entities.length} table(s), ${result.relationships.length} relationship(s)`);
+}
+
+function parseDDL(sql) {
+  sql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
+
+  const entities = [];
+  const pendingFKs = [];
+
+  const tableRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?\s*\(([\s\S]*?)\)\s*[^;]*?(?:;|$)/gi;
+  let m;
+  while ((m = tableRe.exec(sql)) !== null) {
+    const tableName = m[1];
+    const body = m[2];
+
+    const clauses = [];
+    let depth = 0, cur = '';
+    for (const ch of body) {
+      if (ch === '(') { depth++; cur += ch; }
+      else if (ch === ')') { depth--; cur += ch; }
+      else if (ch === ',' && depth === 0) { clauses.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    if (cur.trim()) clauses.push(cur.trim());
+
+    const rawFields = [];
+    const pkCols = new Set();
+    const fkCols = {};
+
+    for (const clause of clauses) {
+      const c = clause.trim();
+      if (!c) continue;
+
+      if (/^PRIMARY\s+KEY/i.test(c)) {
+        const pkM = c.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i);
+        if (pkM) pkM[1].split(',').map(s => s.trim().replace(/`/g, '')).forEach(col => pkCols.add(col));
+        continue;
+      }
+      if (/FOREIGN\s+KEY/i.test(c)) {
+        const fkM = c.match(/FOREIGN\s+KEY\s*\(`?(\w+)`?\)\s*REFERENCES\s*`?(\w+)`?\s*\(`?(\w+)`?\)/i);
+        if (fkM) { fkCols[fkM[1]] = { toTable: fkM[2], toCol: fkM[3] }; pendingFKs.push({ fromTable: tableName, fromCol: fkM[1], toTable: fkM[2], toCol: fkM[3] }); }
+        continue;
+      }
+      if (/^(?:UNIQUE\s+)?(?:KEY|INDEX)\b/i.test(c)) continue;
+
+      const colM = c.match(/^`?(\w+)`?\s+([\w]+(?:\s*\([^)]*\))?)\s*(UNSIGNED\b)?/i);
+      if (!colM) continue;
+      const colName = colM[1];
+      let rawType = colM[2].trim() + (colM[3] ? ' UNSIGNED' : '');
+      const notNull = /NOT\s+NULL/i.test(c);
+      const inlinePK = /\bPRIMARY\s+KEY\b/i.test(c);
+      if (inlinePK) pkCols.add(colName);
+      rawFields.push({ colName, rawType, notNull });
+    }
+
+    const entId = id();
+    const fields = rawFields.map(f => {
+      const isPK = pkCols.has(f.colName);
+      const isFKCol = f.colName in fkCols;
+      const type = mapImportedType(f.rawType);
+      return { id: id(), name: f.colName, type, pk: isPK, fk: isFKCol, nn: !isPK && !isFKCol && type !== 'TIMESTAMP' && f.notNull, refEnt: '', refField: '' };
+    });
+    entities.push({ _id: entId, name: tableName, fields });
+  }
+
+  const nameToEnt = {};
+  entities.forEach(e => { nameToEnt[e.name] = e; });
+  const relationships = [];
+  for (const fk of pendingFKs) {
+    const fromEnt = nameToEnt[fk.fromTable];
+    const toEnt   = nameToEnt[fk.toTable];
+    if (!fromEnt || !toEnt) continue;
+    const fkField = fromEnt.fields.find(f => f.name === fk.fromCol);
+    if (fkField) { fkField.refEnt = toEnt._id; fkField.refField = fk.toCol; }
+    relationships.push({ id: id(), from: toEnt._id, to: fromEnt._id, type: '1:N' });
+  }
+
+  const finalEntities = entities.map((e, i) => ({ id: e._id, name: e.name, x: 40 + (i % 3) * 300, y: 40 + Math.floor(i / 3) * 240, fields: e.fields }));
+  return { entities: finalEntities, relationships };
+}
+
+function mapImportedType(raw) {
+  const r = raw.toUpperCase().replace(/\s+/g, ' ').trim();
+  if (r === 'INT UNSIGNED' || r === 'INTEGER UNSIGNED') return 'UNSIGNED INT';
+  if (/^(INT|INTEGER)$/.test(r)) return 'INT';
+  if (/^BIGINT/.test(r)) return 'BIGINT';
+  if (/^VARCHAR\s*\(\s*50\s*\)$/.test(r)) return 'VARCHAR(50)';
+  if (/^VARCHAR\s*\(\s*100\s*\)$/.test(r)) return 'VARCHAR(100)';
+  if (/^VARCHAR/.test(r)) return 'VARCHAR(255)';
+  if (/^(TINYTEXT|MEDIUMTEXT|LONGTEXT|TEXT)/.test(r)) return 'TEXT';
+  if (/^DATE$/.test(r)) return 'DATE';
+  if (/^DATETIME/.test(r)) return 'DATE';
+  if (/^TIMESTAMP/.test(r)) return 'TIMESTAMP';
+  if (/^(FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)/.test(r)) return 'FLOAT';
+  if (/^(BOOL|BOOLEAN|TINYINT\s*\(\s*1\s*\))/.test(r)) return 'BOOLEAN';
+  return raw.trim();
+}
+
 // ── Save / Load (VS Code API) ───────────────────────────────────────────────
 function saveJSON() {
   vscode.postMessage({ type: 'save', data: { S, uid } });
