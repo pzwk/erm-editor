@@ -87,10 +87,12 @@ function addFieldRow(f = {}) {
   const type = f.type || 'VARCHAR(255)';
   const pk = f.pk || false;
   const fk = f.fk || false;
+  const nn = f.nn || false;
   const refEnt = f.refEnt || '';
   const refField = f.refField || '';
 
   const types = ['INT','UNSIGNED INT','VARCHAR(50)','VARCHAR(100)','VARCHAR(255)','DATE','TIMESTAMP','FLOAT','TEXT','BOOLEAN','BIGINT'];
+  const hideNN = pk || type === 'TIMESTAMP';
 
   const wrap_div = document.createElement('div');
   wrap_div.setAttribute('data-rid', rid);
@@ -102,6 +104,7 @@ function addFieldRow(f = {}) {
       </select>
       <label class="cb-label"><input type="checkbox" class="fi-pk"${pk?' checked':''}> PK</label>
       <label class="cb-label"><input type="checkbox" class="fi-fk"${fk?' checked':''}> FK</label>
+      <label class="cb-label fi-nn-label"${hideNN?' style="display:none"':''}><input type="checkbox" class="fi-nn"${nn?' checked':''}> NN</label>
       <button class="fe-del" onclick="removeRow(${rid})">✕</button>
     </div>
     <div class="fe-ref" style="display:${fk?'flex':'none'};padding:0 6px 6px 6px;">
@@ -115,6 +118,14 @@ function addFieldRow(f = {}) {
   `;
   wrap_div.querySelector('.fi-fk').addEventListener('change', function() {
     wrap_div.querySelector('.fe-ref').style.display = this.checked ? 'flex' : 'none';
+  });
+  wrap_div.querySelector('.fi-pk').addEventListener('change', function() {
+    const isTS = wrap_div.querySelector('.fi-type').value === 'TIMESTAMP';
+    wrap_div.querySelector('.fi-nn-label').style.display = (this.checked || isTS) ? 'none' : '';
+  });
+  wrap_div.querySelector('.fi-type').addEventListener('change', function() {
+    const isPK = wrap_div.querySelector('.fi-pk').checked;
+    wrap_div.querySelector('.fi-nn-label').style.display = (this.value === 'TIMESTAMP' || isPK) ? 'none' : '';
   });
   document.getElementById('fields-editor').appendChild(wrap_div);
 }
@@ -136,11 +147,14 @@ function saveEntity() {
     const isFK = row.querySelector('.fi-fk').checked;
     const refEntEl = row.querySelector('.fi-ref-ent');
     const refFldEl = row.querySelector('.fi-ref-field');
+    const ftype = row.querySelector('.fi-type').value;
+    const nnEl = row.querySelector('.fi-nn');
     fields.push({
       id: id(),
       name: fname,
-      type: row.querySelector('.fi-type').value,
+      type: ftype,
       pk: isPK, fk: isFK,
+      nn: !isPK && ftype !== 'TIMESTAMP' && nnEl ? nnEl.checked : false,
       refEnt: isFK && refEntEl ? (refEntEl.value || '') : '',
       refField: isFK && refFldEl ? refFldEl.value.trim() : ''
     });
@@ -215,6 +229,7 @@ function renderEntities() {
           <div class="frow${f.pk?' is-pk':''}${f.fk?' is-fk':''}">
             ${f.pk ? '<span class="badge pk-b">PK</span>' : ''}
             ${f.fk ? '<span class="badge fk-b">FK</span>' : ''}
+            ${f.nn && !f.pk && f.type !== 'TIMESTAMP' ? '<span class="badge nn-b">NN</span>' : ''}
             <span class="fname">${esc(f.name)}</span>
             <span class="ftype">${esc(f.type)}</span>
           </div>
@@ -510,6 +525,8 @@ function buildSQL() {
         if (/^(INT|BIGINT)/i.test(t) && !f.fk) col += ' AUTO_INCREMENT';
         pks.push(`\`${f.name}\``);
       } else if (f.fk) {
+        col += ' NOT NULL';
+      } else if (f.nn) {
         col += ' NOT NULL';
       }
       lines.push(col);

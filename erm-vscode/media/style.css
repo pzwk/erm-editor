@@ -42,6 +42,7 @@ body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #cdd6f4;
 .badge { font-size: 9px; font-weight: 700; padding: 1px 3px; border-radius: 3px; flex-shrink: 0; }
 .pk-b { background: #f9e2af; color: #1e1e2e; }
 .fk-b { background: #89b4fa; color: #1e1e2e; }
+.nn-b { background: #a6e3a1; color: #1e1e2e; }
 .fname { flex: 1; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ftype { color: #585b70; font-size: 11px; white-space: nowrap; }
 .entity-add-field { padding: 4px 10px; font-size: 11px; color: #585b70; cursor: pointer; border-top: 1px solid #313244; text-align: center; transition: color 0.1s; }
