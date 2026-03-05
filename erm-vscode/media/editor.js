@@ -90,7 +90,7 @@ function addFieldRow(f = {}) {
   const refEnt = f.refEnt || '';
   const refField = f.refField || '';
 
-  const types = ['INT','UNSIGNED INT','VARCHAR(50)','VARCHAR(100)','VARCHAR(255)','DATE','FLOAT','TEXT','BOOLEAN','BIGINT'];
+  const types = ['INT','UNSIGNED INT','VARCHAR(50)','VARCHAR(100)','VARCHAR(255)','DATE','TIMESTAMP','FLOAT','TEXT','BOOLEAN','BIGINT'];
 
   const wrap_div = document.createElement('div');
   wrap_div.setAttribute('data-rid', rid);
@@ -493,10 +493,18 @@ function buildSQL() {
     const lines = [];
     const pks   = [];
 
+    let firstTimestamp = true;
     ent.fields.forEach(f => {
       let t = f.type === 'UNSIGNED INT' ? 'INT UNSIGNED' : f.type;
       let col = `  \`${f.name}\` ${t}`;
-      if (f.pk) {
+      if (f.type === 'TIMESTAMP') {
+        if (firstTimestamp) {
+          col += ' NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP';
+          firstTimestamp = false;
+        } else {
+          col += ' NULL DEFAULT NULL';
+        }
+      } else if (f.pk) {
         col += ' NOT NULL';
         // composite PK / FK columns must not be AUTO_INCREMENT
         if (/^(INT|BIGINT)/i.test(t) && !f.fk) col += ' AUTO_INCREMENT';
