@@ -602,6 +602,15 @@ function openImportModal() {
   document.getElementById('import-overlay').classList.add('open');
 }
 
+function onSQLFileLoad(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  e.target.value = '';
+  const r = new FileReader();
+  r.onload = ev => { document.getElementById('import-box').value = ev.target.result; };
+  r.readAsText(f);
+}
+
 function doImport() {
   const sql = document.getElementById('import-box').value.trim();
   if (!sql) { toast('Paste some SQL first'); return; }
@@ -622,11 +631,22 @@ function parseDDL(sql) {
   const entities = [];
   const pendingFKs = [];
 
-  const tableRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?\s*\(([\s\S]*?)\)\s*[^;]*?(?:;|$)/gi;
+  // Extract tables using depth-counting so nested parens (e.g. int(11)) don't confuse the match
+  const tableHeaders = [];
+  const headerRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(`[^`]+`|\w+)\s*\(/gi;
   let m;
-  while ((m = tableRe.exec(sql)) !== null) {
-    const tableName = m[1];
-    const body = m[2];
+  while ((m = headerRe.exec(sql)) !== null) {
+    const tableName = m[1].replace(/`/g, '');
+    let depth = 1, i = m.index + m[0].length;
+    while (i < sql.length && depth > 0) {
+      if (sql[i] === '(') depth++;
+      else if (sql[i] === ')') depth--;
+      i++;
+    }
+    tableHeaders.push({ tableName, body: sql.slice(m.index + m[0].length, i - 1) });
+  }
+
+  for (const { tableName, body } of tableHeaders) {
 
     const clauses = [];
     let depth = 0, cur = '';
@@ -658,9 +678,9 @@ function parseDDL(sql) {
       }
       if (/^(?:UNIQUE\s+)?(?:KEY|INDEX)\b/i.test(c)) continue;
 
-      const colM = c.match(/^`?(\w+)`?\s+([\w]+(?:\s*\([^)]*\))?)\s*(UNSIGNED\b)?/i);
+      const colM = c.match(/^(`[^`]+`|\w+)\s+([\w]+(?:\s*\([^)]*\))?)\s*(UNSIGNED\b)?/i);
       if (!colM) continue;
-      const colName = colM[1];
+      const colName = colM[1].replace(/`/g, '');
       let rawType = colM[2].trim() + (colM[3] ? ' UNSIGNED' : '');
       const notNull = /NOT\s+NULL/i.test(c);
       const inlinePK = /\bPRIMARY\s+KEY\b/i.test(c);
@@ -676,7 +696,7 @@ function parseDDL(sql) {
       return { id: id(), name: f.colName, type, pk: isPK, fk: isFKCol, nn: !isPK && !isFKCol && type !== 'TIMESTAMP' && f.notNull, refEnt: '', refField: '' };
     });
     entities.push({ _id: entId, name: tableName, fields });
-  }
+  } // end for tableHeaders
 
   const nameToEnt = {};
   entities.forEach(e => { nameToEnt[e.name] = e; });
@@ -696,9 +716,10 @@ function parseDDL(sql) {
 
 function mapImportedType(raw) {
   const r = raw.toUpperCase().replace(/\s+/g, ' ').trim();
-  if (r === 'INT UNSIGNED' || r === 'INTEGER UNSIGNED') return 'UNSIGNED INT';
-  if (/^(INT|INTEGER)$/.test(r)) return 'INT';
-  if (/^BIGINT/.test(r)) return 'BIGINT';
+  if (/^(INT|INTEGER)\s*(\(\d+\))?\s+UNSIGNED$/.test(r)) return 'UNSIGNED INT';
+  if (/^(INT|INTEGER)(\s*\(\d+\))?$/.test(r)) return 'INT';
+  if (/^BIGINT(\s*\(\d+\))?(\s+UNSIGNED)?/.test(r)) return 'BIGINT';
+  if (/^(TINYINT|SMALLINT|MEDIUMINT)(\s*\(\d+\))?$/.test(r)) return 'INT';
   if (/^VARCHAR\s*\(\s*50\s*\)$/.test(r)) return 'VARCHAR(50)';
   if (/^VARCHAR\s*\(\s*100\s*\)$/.test(r)) return 'VARCHAR(100)';
   if (/^VARCHAR/.test(r)) return 'VARCHAR(255)';
@@ -706,7 +727,7 @@ function mapImportedType(raw) {
   if (/^DATE$/.test(r)) return 'DATE';
   if (/^DATETIME/.test(r)) return 'DATE';
   if (/^TIMESTAMP/.test(r)) return 'TIMESTAMP';
-  if (/^(FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)/.test(r)) return 'FLOAT';
+  if (/^(FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)(\s*\([^)]*\))?/.test(r)) return 'FLOAT';
   if (/^(BOOL|BOOLEAN|TINYINT\s*\(\s*1\s*\))/.test(r)) return 'BOOLEAN';
   return raw.trim();
 }

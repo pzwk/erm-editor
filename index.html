@@ -185,10 +185,11 @@ input[type=text]:focus, input[type=number]:focus, select:focus { border-color: #
 <div class="overlay" id="import-overlay">
   <div class="modal" style="min-width:600px">
     <h2>&#128229; Import SQL (MySQL / MariaDB)</h2>
-    <p style="font-size:12px;color:#585b70;margin-bottom:10px">Paste a CREATE TABLE script to reverse-engineer the schema into an ERM diagram.</p>
+    <p style="font-size:12px;color:#585b70;margin-bottom:10px">Paste a CREATE TABLE script, or load a <code>.sql</code> file.</p>
     <textarea id="import-box" style="width:100%;height:280px;background:#0d1117;border:1px solid #313244;border-radius:6px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#a6e3a1;resize:vertical;box-sizing:border-box" placeholder="CREATE TABLE `users` (&#10;  `id` INT NOT NULL AUTO_INCREMENT,&#10;  `name` VARCHAR(255) NOT NULL,&#10;  PRIMARY KEY (`id`)&#10;);"></textarea>
     <div class="mfooter">
       <button class="btn btn-secondary" onclick="document.getElementById('import-overlay').classList.remove('open')">Cancel</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('sql-file-input').click()">&#128194; Load .sql file</button>
       <button class="btn btn-primary" onclick="doImport()">Import</button>
     </div>
   </div>
@@ -219,6 +220,7 @@ input[type=text]:focus, input[type=number]:focus, select:focus { border-color: #
 
 <div id="toast"></div>
 <input type="file" id="file-input" accept=".json" style="display:none" onchange="onFileLoad(event)">
+<input type="file" id="sql-file-input" accept=".sql,.txt" style="display:none" onchange="onSQLFileLoad(event)">
 
 <script>
 'use strict';
@@ -842,6 +844,15 @@ function openImportModal() {
   document.getElementById('import-overlay').classList.add('open');
 }
 
+function onSQLFileLoad(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  e.target.value = '';
+  const r = new FileReader();
+  r.onload = ev => { document.getElementById('import-box').value = ev.target.result; };
+  r.readAsText(f);
+}
+
 function doImport() {
   const sql = document.getElementById('import-box').value.trim();
   if (!sql) { toast('Paste some SQL first'); return; }
@@ -863,11 +874,22 @@ function parseDDL(sql) {
   const entities = [];
   const pendingFKs = [];
 
-  const tableRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?\s*\(([\s\S]*?)\)\s*[^;]*?(?:;|$)/gi;
+  // Extract tables using depth-counting so nested parens (e.g. int(11)) don't confuse the match
+  const tableHeaders = [];
+  const headerRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(`[^`]+`|\w+)\s*\(/gi;
   let m;
-  while ((m = tableRe.exec(sql)) !== null) {
-    const tableName = m[1];
-    const body = m[2];
+  while ((m = headerRe.exec(sql)) !== null) {
+    const tableName = m[1].replace(/`/g, '');
+    let depth = 1, i = m.index + m[0].length;
+    while (i < sql.length && depth > 0) {
+      if (sql[i] === '(') depth++;
+      else if (sql[i] === ')') depth--;
+      i++;
+    }
+    tableHeaders.push({ tableName, body: sql.slice(m.index + m[0].length, i - 1) });
+  }
+
+  for (const { tableName, body } of tableHeaders) {
 
     // Split clauses by comma at paren-depth 0
     const clauses = [];
@@ -900,9 +922,9 @@ function parseDDL(sql) {
       }
       if (/^(?:UNIQUE\s+)?(?:KEY|INDEX)\b/i.test(c)) continue;
 
-      const colM = c.match(/^`?(\w+)`?\s+([\w]+(?:\s*\([^)]*\))?)\s*(UNSIGNED\b)?/i);
+      const colM = c.match(/^(`[^`]+`|\w+)\s+([\w]+(?:\s*\([^)]*\))?)\s*(UNSIGNED\b)?/i);
       if (!colM) continue;
-      const colName = colM[1];
+      const colName = colM[1].replace(/`/g, '');
       let rawType = colM[2].trim() + (colM[3] ? ' UNSIGNED' : '');
       const notNull = /NOT\s+NULL/i.test(c);
       const inlinePK = /\bPRIMARY\s+KEY\b/i.test(c);
@@ -918,7 +940,7 @@ function parseDDL(sql) {
       return { id: id(), name: f.colName, type, pk: isPK, fk: isFKCol, nn: !isPK && !isFKCol && type !== 'TIMESTAMP' && f.notNull, refEnt: '', refField: '' };
     });
     entities.push({ _id: entId, name: tableName, fields });
-  }
+  } // end for tableHeaders
 
   // Build entity name→id map and wire up FK refs + relationships
   const nameToEnt = {};
@@ -940,9 +962,10 @@ function parseDDL(sql) {
 
 function mapImportedType(raw) {
   const r = raw.toUpperCase().replace(/\s+/g, ' ').trim();
-  if (r === 'INT UNSIGNED' || r === 'INTEGER UNSIGNED') return 'UNSIGNED INT';
-  if (/^(INT|INTEGER)$/.test(r)) return 'INT';
-  if (/^BIGINT/.test(r)) return 'BIGINT';
+  if (/^(INT|INTEGER)\s*(\(\d+\))?\s+UNSIGNED$/.test(r)) return 'UNSIGNED INT';
+  if (/^(INT|INTEGER)(\s*\(\d+\))?$/.test(r)) return 'INT';
+  if (/^BIGINT(\s*\(\d+\))?(\s+UNSIGNED)?/.test(r)) return 'BIGINT';
+  if (/^(TINYINT|SMALLINT|MEDIUMINT)(\s*\(\d+\))?$/.test(r)) return 'INT';
   if (/^VARCHAR\s*\(\s*50\s*\)$/.test(r)) return 'VARCHAR(50)';
   if (/^VARCHAR\s*\(\s*100\s*\)$/.test(r)) return 'VARCHAR(100)';
   if (/^VARCHAR/.test(r)) return 'VARCHAR(255)';
@@ -950,7 +973,7 @@ function mapImportedType(raw) {
   if (/^DATE$/.test(r)) return 'DATE';
   if (/^DATETIME/.test(r)) return 'DATE';
   if (/^TIMESTAMP/.test(r)) return 'TIMESTAMP';
-  if (/^(FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)/.test(r)) return 'FLOAT';
+  if (/^(FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)(\s*\([^)]*\))?/.test(r)) return 'FLOAT';
   if (/^(BOOL|BOOLEAN|TINYINT\s*\(\s*1\s*\))/.test(r)) return 'BOOLEAN';
   return raw.trim();
 }
