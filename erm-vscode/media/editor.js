@@ -227,11 +227,11 @@ function renderEntities() {
       <div class="entity-fields">
         ${ent.fields.map(f => `
           <div class="frow${f.pk?' is-pk':''}${f.fk?' is-fk':''}">
+            <span class="fname">${esc(f.name)}</span>
+            <span class="ftype">${esc(f.type)}</span>
             ${f.pk ? '<span class="badge pk-b">PK</span>' : ''}
             ${f.fk ? '<span class="badge fk-b">FK</span>' : ''}
             ${f.nn && !f.pk && f.type !== 'TIMESTAMP' ? '<span class="badge nn-b">NN</span>' : ''}
-            <span class="fname">${esc(f.name)}</span>
-            <span class="ftype">${esc(f.type)}</span>
           </div>
         `).join('')}
       </div>
